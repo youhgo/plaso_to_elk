@@ -239,7 +239,7 @@ class PlasoToELK:
                     # os.system('cls' if os.name=='nt' else 'clear')
                     it += 1
                     # print("processing line : {}".format(it))
-                    if it % 5000 == 0:
+                    if it % 10000 == 0:
                         print("processing line : {}".format(it))
 
                     d_line = json.loads(line)
@@ -279,7 +279,7 @@ class PlasoToELK:
             for ok, result in streaming_bulk(
                     self.elk_client,
                     docs_generator,
-                    chunk_size=5000,
+                    chunk_size=10000,
                     raise_on_error=False,
                     raise_on_exception=False
             ):
