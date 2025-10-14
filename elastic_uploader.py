@@ -2,6 +2,8 @@
 # -*- coding: utf-8 -*-
 
 import json
+import traceback
+
 from elasticsearch import Elasticsearch
 from elasticsearch.helpers import streaming_bulk
 
@@ -66,4 +68,4 @@ class ElasticUploader:
             if fail_count > 0:
                 print(f"Documents en échec : {fail_count}")
         except Exception as e:
-            print(f"Une erreur critique est survenue durant l'envoi en streaming : {e}")
+            print(f"Une erreur critique est survenue durant l'envoi en streaming : {traceback.format_exc()}")
