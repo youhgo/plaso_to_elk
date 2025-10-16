@@ -25,7 +25,8 @@ class LnkJsonProcessor(BaseFileProcessor):
         final_timestamp = self._get_valid_timestamp(raw_log)
         header, data, extra = raw_log.get("header", {}), raw_log.get("data", {}), raw_log.get("extra", {})
         target_path = extra.get("ENVIRONMENTAL_VARIABLES_LOCATION_BLOCK", {}).get("target_unicode") or extra.get("ENVIRONMENTAL_VARIABLES_LOCATION_BLOCK", {}).get("target_ansi")
-        return {"@timestamp": final_timestamp,
+        return {
+            "@timestamp": final_timestamp,
                 "event": { "kind": "event",
                            "category": "file", "dataset": "lnk",
                            "original": json.dumps(raw_log) },
@@ -38,7 +39,9 @@ class LnkJsonProcessor(BaseFileProcessor):
                               "flags": header.get("link_flags"),
                               "creation_time": self._format_lnk_timestamp(header.get("creation_time")),
                               "modified_time": self._format_lnk_timestamp(header.get("modified_time")),
-                              "accessed_time": self._format_lnk_timestamp(header.get("accessed_time")) } }}
+                              "accessed_time": self._format_lnk_timestamp(header.get("accessed_time")) }
+                          }
+                }
 
     def process_file(self, filepath: str, **kwargs):
         print(f"  -> Lecture du fichier LNK (JSON complet) : {filepath}")
