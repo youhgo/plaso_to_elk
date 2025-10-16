@@ -16,31 +16,47 @@ class EvtxHandler:
     def __init__(self):
         # Dispatcher pour les logs de Sécurité
         self.SECURITY_EVENT_HANDLERS = {
-            4624: self.handle_security_logon,
-            4625: self.handle_security_logon_fail,
-            4648: self.handle_security_logon,
-            4672: self.handle_4672_special_privileges,
-            4688: self.handle_security_process_created,
-            4720: self.handle_user_modification,
-            4723: self.handle_user_modification,
-            4724: self.handle_user_modification,
+            4624: self.handle_security_logon, 4625: self.handle_security_logon_fail,
+            4648: self.handle_security_logon, 4672: self.handle_4672_special_privileges,
+            4688: self.handle_security_process_created, 4720: self.handle_user_modification,
+            4723: self.handle_user_modification, 4724: self.handle_user_modification,
             4726: self.handle_user_modification
         }
         # Dispatcher pour les logs PowerShell
         self.POWERSHELL_EVENT_HANDLERS = {
-            4103: self.handle_ps_module_logging,
-            4104: self.handle_ps_script_block,
+            400: self.handle_ps_engine_state, 600: self.handle_ps_engine_state,
+            4103: self.handle_ps_module_logging, 4104: self.handle_ps_script_block,
         }
         # Dispatcher pour les logs Système
-        self.SYSTEM_EVENT_HANDLERS = {
-            7045: self.handle_system_service_install,
-        }
+        self.SYSTEM_EVENT_HANDLERS = {7045: self.handle_system_service_install}
+        # Dispatcher pour les logs WMI
+        self.WMI_EVENT_HANDLERS = {5858: self.handle_wmi_failure, 5860: self.handle_wmi_activity,
+                                   5861: self.handle_wmi_activity}
+        # Dispatcher pour les logs Windows Defender
+        self.WINDEFENDER_EVENT_HANDLERS = {1116: self.handle_windefender, 1117: self.handle_windefender,
+                                           1118: self.handle_windefender, 1119: self.handle_windefender}
+        # Dispatcher pour les Tâches Planifiées
+        self.TASKSCHEDULER_EVENT_HANDLERS = {106: self.handle_task_scheduler, 107: self.handle_task_scheduler,
+                                             140: self.handle_task_scheduler, 141: self.handle_task_scheduler,
+                                             200: self.handle_task_scheduler, 201: self.handle_task_scheduler}
+        # Dispatcher pour RDP Remote
+        self.RDP_REMOTE_EVENT_HANDLERS = {1149: self.handle_rdp_remote_success}
+        # Dispatcher pour RDP Local
+        self.RDP_LOCAL_EVENT_HANDLERS = {21: self.handle_rdp_local_session, 24: self.handle_rdp_local_session,
+                                         25: self.handle_rdp_local_session, 39: self.handle_rdp_local_session,
+                                         40: self.handle_rdp_local_session}
+        # Dispatcher pour BITS Client
+        self.BITS_EVENT_HANDLERS = {3: self.handle_bits_client, 4: self.handle_bits_client, 59: self.handle_bits_client,
+                                    60: self.handle_bits_client, 61: self.handle_bits_client}
 
     def _get_system_data(self, raw_log: dict) -> dict:
         return raw_log.get("Event", {}).get("System", {})
 
     def _get_event_data(self, raw_log: dict) -> dict:
         return raw_log.get("Event", {}).get("EventData", {})
+
+    def _get_user_data(self, raw_log: dict) -> dict:
+        return raw_log.get("Event", {}).get("UserData", {})
 
     def _format_timestamp(self, time_str: str) -> str:
         if not time_str: return datetime.utcnow().isoformat() + "Z"
@@ -54,7 +70,6 @@ class EvtxHandler:
         system_data = self._get_system_data(raw_log)
         time_created = system_data.get("TimeCreated", {}).get("SystemTime")
         event_id_value = system_data.get("EventID", 0)
-
         final_event_id = 0
         if isinstance(event_id_value, dict):
             id_val = event_id_value.get("Value") or event_id_value.get("#text")
@@ -67,7 +82,6 @@ class EvtxHandler:
                 final_event_id = int(event_id_value)
             except (ValueError, TypeError):
                 pass
-
         return {"@timestamp": self._format_timestamp(time_created), "host": {"name": system_data.get("Computer")},
                 "winlog": {"provider_name": system_data.get("Provider", {}).get("Name"), "event_id": final_event_id,
                            "channel": system_data.get("Channel")},
@@ -137,41 +151,164 @@ class EvtxHandler:
 
     def handle_system_service_install(self, raw_log: dict) -> dict:
         doc, data = self._create_base_document(raw_log), self._get_event_data(raw_log)
-        doc.update({"event": {**doc["event"],
-                              "action": "service_installed"},
-                    "service": {"name": data.get("ServiceName"),
-                                "path": data.get("ImagePath"),
-                                "start_type": data.get("StartType"),
-                                "account": data.get("AccountName")}})
+        doc.update({"event": {**doc["event"], "action": "service_installed"},
+                    "service": {"name": data.get("ServiceName"), "path": data.get("ImagePath"),
+                                "start_type": data.get("StartType"), "account": data.get("AccountName")}})
         return doc
 
     def handle_4672_special_privileges(self, raw_log: dict) -> dict:
         doc = self._create_base_document(raw_log)
         data = self._get_event_data(raw_log)
-        doc.update({
-            "event": {**doc["event"], "action": "special_privileges_assigned"},
-            "user": {"name": data.get("SubjectUserName"), "domain": data.get("SubjectDomainName")},
-            "winlog": {**doc["winlog"], "event_data": {"privileges": data.get("PrivilegeList")}}
-        })
+        doc.update({"event": {**doc["event"], "action": "special_privileges_assigned"},
+                    "user": {"name": data.get("SubjectUserName"), "domain": data.get("SubjectDomainName")},
+                    "winlog": {**doc["winlog"], "event_data": {"privileges": data.get("PrivilegeList")}}})
         return doc
 
     def handle_ps_script_block(self, raw_log: dict) -> dict:
         doc = self._create_base_document(raw_log)
         data = self._get_event_data(raw_log)
-        doc.update({
-            "event": {**doc["event"], "action": "powershell_script_block_execution"},
-            "process": {"pid": data.get("HostId"), "name": data.get("HostName")},
-            "powershell": {"script_block_id": data.get("ScriptBlockId"),
-                           "script_block_text": data.get("ScriptBlockText"), "path": data.get("Path")}
-        })
+        doc.update({"event": {**doc["event"], "action": "powershell_script_block_execution"},
+                    "process": {"pid": data.get("HostId"), "name": data.get("HostName")},
+                    "powershell": {"script_block_id": data.get("ScriptBlockId"),
+                                   "script_block_text": data.get("ScriptBlockText"), "path": data.get("Path")}})
         return doc
 
     def handle_ps_module_logging(self, raw_log: dict) -> dict:
         doc = self._create_base_document(raw_log)
         data = self._get_event_data(raw_log)
+        doc.update({"event": {**doc["event"], "action": "powershell_module_pipeline_execution"},
+                    "powershell": {"context": data.get("Context"), "payload": data.get("Payload")}})
+        return doc
+
+    def handle_ps_engine_state(self, raw_log: dict) -> dict:
+        doc = self._create_base_document(raw_log)
+        data = self._get_event_data(raw_log)
+
+        ps_details = {}
+        data_block = data.get("Data")
+        if isinstance(data_block, list) and len(data_block) > 0:
+            for line in data_block[-1].splitlines():
+                if '=' in line:
+                    key, val = line.split('=', 1)
+                    ps_details[key.strip()] = val.strip()
+
         doc.update({
-            "event": {**doc["event"], "action": "powershell_module_pipeline_execution"},
-            "powershell": {"context": data.get("Context"), "payload": data.get("Payload")}
+            "event": {**doc["event"], "action": "powershell_engine_state_change"},
+            "powershell": {"engine_state": ps_details.get("NewEngineState", data.get("NewEngineState")),
+                           "host": {"name": ps_details.get("HostName"), "version": ps_details.get("HostVersion"),
+                                    "id": ps_details.get("HostId")}, "runspace_id": ps_details.get("RunspaceId")},
+            "process": {"command_line": ps_details.get("HostApplication")}
+        })
+        return doc
+
+    def handle_wmi_activity(self, raw_log: dict) -> dict:
+        doc = self._create_base_document(raw_log)
+        user_data = self._get_user_data(raw_log)
+
+        op_data = user_data.get("Operation_TemporaryEssStarted") or user_data.get("Operation_EssStarted")
+
+        if op_data:
+            doc.update({
+                "event": {**doc["event"], "action": "wmi_activity", "outcome": "success"},
+                "wmi": {"namespace": op_data.get("NamespaceName"), "query": op_data.get("Query"),
+                        "operation": op_data.get("Operation", "EssStarted")},
+                "source": {"process": {"pid": op_data.get("Processid")}},
+                "user": {"name": op_data.get("User")}
+            })
+        else:
+            # Fallback for other WMI success events using EventData
+            data = self._get_event_data(raw_log)
+            doc.update({"event": {**doc["event"], "action": "wmi_activity", "outcome": "success"},
+                        "wmi": {"operation": data.get("Operation"), "query": data.get("Query"),
+                                "consumer": data.get("Consumer")}, "user": {"name": data.get("User")}})
+        return doc
+
+    def handle_wmi_failure(self, raw_log: dict) -> dict:
+        doc = self._create_base_document(raw_log)
+        user_data = self._get_user_data(raw_log)
+        failure_data = user_data.get("Operation_ClientFailure", {})
+        doc.update({
+            "event": {**doc["event"], "action": "wmi_activity", "outcome": "failure"},
+            "source": {"domain": failure_data.get("ClientMachine"),
+                       "process": {"pid": failure_data.get("ClientProcessId")}},
+            "wmi": {"operation": failure_data.get("Operation"), "component": failure_data.get("Component")},
+            "user": {"name": failure_data.get("User")},
+            "error": {"code": failure_data.get("ResultCode"), "message": failure_data.get("PossibleCause")}
+        })
+        return doc
+
+    def handle_windefender(self, raw_log: dict) -> dict:
+        doc = self._create_base_document(raw_log)
+        data = self._get_event_data(raw_log)
+        actions = {1116: "threat_detected", 1117: "threat_action_taken", 1118: "threat_action_failed",
+                   1119: "history_deleted"}
+        doc.update({"event": {**doc["event"], "action": actions.get(doc["winlog"]["event_id"], "defender_activity"),
+                              "provider": "Windows Defender"},
+                    "threat": {"name": data.get("Threat Name"), "severity": data.get("Severity Name"),
+                               "path": data.get("Path")}, "user": {"name": data.get("Detection User")}})
+        return doc
+
+    def handle_task_scheduler(self, raw_log: dict) -> dict:
+        doc = self._create_base_document(raw_log)
+        data = self._get_event_data(raw_log)
+        doc.update({"event": {**doc["event"], "action": "scheduled_task_activity"},
+                    "task": {"name": data.get("TaskName"), "action": data.get("ActionName"),
+                             "result_code": data.get("ResultCode")}, "user": {"name": data.get("UserContext")}})
+        return doc
+
+    def handle_rdp_remote_success(self, raw_log: dict) -> dict:
+        doc = self._create_base_document(raw_log)
+        data = self._get_event_data(raw_log)
+        doc.update(
+            {"event": {**doc["event"], "action": "rdp_login", "outcome": "success"}, "user": {"name": data.get("User")},
+             "source": {"ip": data.get("ClientAddress")}})
+        return doc
+
+    def handle_rdp_local_session(self, raw_log: dict) -> dict:
+        doc = self._create_base_document(raw_log)
+        user_data = self._get_user_data(raw_log)
+        event_xml_data = user_data.get("EventXML", {})
+
+        actions = {21: "session_logon", 24: "session_disconnected", 25: "session_reconnected",
+                   39: "session_disconnected_by_other", 40: "session_disconnected_by_other"}
+        doc.update({
+            "event": {**doc["event"], "action": actions.get(doc["winlog"]["event_id"], "rdp_session_activity")},
+            "user": {"name": event_xml_data.get("User")},
+            "source": {"ip": event_xml_data.get("Address")},
+            "winlog": {**doc["winlog"], "session_id": event_xml_data.get("SessionID")}
+        })
+        return doc
+
+    def handle_bits_client(self, raw_log: dict) -> dict:
+        doc = self._create_base_document(raw_log)
+        data = self._get_event_data(raw_log)
+
+        actions = {
+            3: "bits_job_creation",
+            4: "bits_job_transferred",
+            59: "bits_job_modified",
+            60: "bits_job_error",
+            61: "bits_job_cancelled"
+        }
+
+        doc.update({
+            "event": {**doc["event"], "action": actions.get(doc["winlog"]["event_id"], "bits_job_activity")},
+            "bits": {
+                "job_id": data.get("Id") or data.get("jobId"),
+                "job_title": data.get("name") or data.get("jobTitle"),
+                "transfer_id": data.get("transferId"),
+                "owner": data.get("owner")
+            },
+            "file": {
+                "name": os.path.basename(data.get("url", "").split('?')[0]) if data.get("url") else data.get("name"),
+                "size": data.get("fileLength"),
+                "mtime": data.get("fileTime")
+            },
+            "network": {
+                "bytes_Transfered": data.get("bytesTransferred"),
+                "total_bytes": data.get("bytesTotal")
+            },
+            "url": {"original": data.get("url")}
         })
         return doc
 
@@ -186,20 +323,26 @@ class EvtxJsonProcessor(BaseFileProcessor):
             'system': self._process_system_log,
             'powershell_operational': self._process_powershell_log,
             'windows_powershell': self._process_powershell_log,
+            'wmi': self._process_wmi_log,
+            'windefender': self._process_windefender_log,
+            'taskScheduler': self._process_taskscheduler_log,
+            'rdp_remote': self._process_rdp_remote_log,
+            'rdp_local': self._process_rdp_local_log,
+            'bits': self._process_bits_log,
         }
         self.LOG_FILE_MAP = {
-            r'(\d+_)?Security\.evtx\.json': "security",
-            r'(\d+_)?System\.evtx\.json': "system",
-            r'^Security\.evtx\.json': "security",
-            r'^System\.evtx\.json': "system",
-            r'.*Microsoft-Windows-TaskScheduler.*Operational\.evtx\.json': "taskScheduler",
-            r'.*Microsoft-Windows-TerminalServices-RemoteConnectionManager.*Operational\.evtx\.json': "rdp_remote",
+            r'(\d+_)?Security\.evtx\.json?': "security",
+            r'(\d+_)?System\.evtx\.json?': "system",
+            r'^Security\.evtx\.json?': "security",
+            r'^System\.evtx\.json?': "system",
+            r'.*Microsoft-Windows-TaskScheduler.*Operational\.evtx\.json?': "taskScheduler",
+            r'.*Microsoft-Windows-TerminalServices-RemoteConnectionManager.*Operational\.evtx\.json?': "rdp_remote",
             r'.*Microsoft-Windows-TerminalServices-LocalSessionManager.*Operational\.evtx\.json': "rdp_local",
             r'.*Microsoft-Windows-Bits-Client.*Operational\.evtx\.json': "bits",
             r'.*Microsoft-Windows-PowerShell.*Operational\.evtx\.json': "powershell_operational",
-            r'.*Windows PowerShell\.evtx\.json': "windows_powershell",
+            r'.*Windows PowerShell\.evtx\.json?': "windows_powershell",
             r'.*Microsoft-Windows-WMI-Activity.*Operational\.evtx\.json': "wmi",
-            r'.*Microsoft-Windows-Windows Defender.*Operational\.evtx\.json': "windefender",
+            r'.*Microsoft-Windows-Windows Defender.*Operational\.evtx\.json?': "windefender",
         }
 
     def _get_event_id(self, raw_log: dict) -> int:
@@ -226,6 +369,36 @@ class EvtxJsonProcessor(BaseFileProcessor):
     def _process_system_log(self, raw_log: dict) -> dict:
         event_id = self._get_event_id(raw_log)
         handler_method = self.handler.SYSTEM_EVENT_HANDLERS.get(event_id, self.handler.handle_generic_evtx)
+        return handler_method(raw_log)
+
+    def _process_wmi_log(self, raw_log: dict) -> dict:
+        event_id = self._get_event_id(raw_log)
+        handler_method = self.handler.WMI_EVENT_HANDLERS.get(event_id, self.handler.handle_generic_evtx)
+        return handler_method(raw_log)
+
+    def _process_windefender_log(self, raw_log: dict) -> dict:
+        event_id = self._get_event_id(raw_log)
+        handler_method = self.handler.WINDEFENDER_EVENT_HANDLERS.get(event_id, self.handler.handle_generic_evtx)
+        return handler_method(raw_log)
+
+    def _process_taskscheduler_log(self, raw_log: dict) -> dict:
+        event_id = self._get_event_id(raw_log)
+        handler_method = self.handler.TASKSCHEDULER_EVENT_HANDLERS.get(event_id, self.handler.handle_generic_evtx)
+        return handler_method(raw_log)
+
+    def _process_rdp_remote_log(self, raw_log: dict) -> dict:
+        event_id = self._get_event_id(raw_log)
+        handler_method = self.handler.RDP_REMOTE_EVENT_HANDLERS.get(event_id, self.handler.handle_generic_evtx)
+        return handler_method(raw_log)
+
+    def _process_rdp_local_log(self, raw_log: dict) -> dict:
+        event_id = self._get_event_id(raw_log)
+        handler_method = self.handler.RDP_LOCAL_EVENT_HANDLERS.get(event_id, self.handler.handle_generic_evtx)
+        return handler_method(raw_log)
+
+    def _process_bits_log(self, raw_log: dict) -> dict:
+        event_id = self._get_event_id(raw_log)
+        handler_method = self.handler.BITS_EVENT_HANDLERS.get(event_id, self.handler.handle_generic_evtx)
         return handler_method(raw_log)
 
     def _process_generic_evtx(self, raw_log: dict) -> dict:

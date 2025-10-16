@@ -24,6 +24,20 @@ class PlasoToELK:
        Attributes :
        None
     """
+    self.LOG_FILE_MAP = {
+        r'(\d+_)?Security\.evtx\.json?': "security",
+        r'(\d+_)?System\.evtx\.json?': "system",
+        r'^Security\.evtx\.json?': "security",
+        r'^System\.evtx\.json?': "system",
+        r'.*Microsoft-Windows-TaskScheduler.*Operational\.evtx\.json?': "taskScheduler",
+        r'.*Microsoft-Windows-TerminalServices-RemoteConnectionManager.*Operational\.evtx\.json?': "rdp_remote",
+        r'.*Microsoft-Windows-TerminalServices-LocalSessionManager.*Operational\.evtx\.json': "rdp_local",
+        r'.*Microsoft-Windows-Bits-Client.*Operational\.evtx\.json': "bits",
+        r'.*Microsoft-Windows-PowerShell.*Operational\.evtx\.json': "powershell_operational",
+        r'.*Windows PowerShell\.evtx\.json?': "windows_powershell",
+        r'.*Microsoft-Windows-WMI-Activity.*Operational\.evtx\.json': "wmi",
+        r'.*Microsoft-Windows-Windows Defender.*Operational\.evtx\.json?': "windefender",
+    }
 
     def __init__(self, path_to_timeline, case_name=None, machine_name=None, is_flat=False, elk_ip="localhost",
                  elk_port="9200") -> None:
